@@ -2,6 +2,11 @@ package com.ingescompany.doofplus.platform.monitoring.domain.model.valueobjects;
 
 import java.util.regex.Pattern;
 
+/**
+ * Unique alphanumeric code identifying a piece of equipment, such as EQ-COAT-02.
+ *
+ * @param value equipment code string
+ */
 public record EquipmentCode(String value) {
     private static final int MAX_LENGTH = 64;
     private static final Pattern ALLOWED_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]+$");
