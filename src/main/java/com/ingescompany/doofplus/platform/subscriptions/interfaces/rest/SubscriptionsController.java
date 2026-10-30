@@ -1,0 +1,173 @@
+package com.ingescompany.doofplus.platform.subscriptions.interfaces.rest;
+
+import com.ingescompany.doofplus.platform.subscriptions.application.commandservices.SubscriptionCommandService;
+import com.ingescompany.doofplus.platform.subscriptions.application.queryservices.SubscriptionQueryService;
+import com.ingescompany.doofplus.platform.subscriptions.domain.model.commands.ActivateSubscriptionCommand;
+import com.ingescompany.doofplus.platform.subscriptions.domain.model.commands.CancelSubscriptionCommand;
+import com.ingescompany.doofplus.platform.subscriptions.domain.model.queries.GetAllSubscriptionsByOrganizationIdQuery;
+import com.ingescompany.doofplus.platform.subscriptions.domain.model.queries.GetSubscriptionByIdQuery;
+import com.ingescompany.doofplus.platform.subscriptions.domain.model.valueobjects.OrganizationId;
+import com.ingescompany.doofplus.platform.subscriptions.interfaces.rest.resources.CreateSubscriptionResource;
+import com.ingescompany.doofplus.platform.subscriptions.interfaces.rest.resources.SubscriptionResource;
+import com.ingescompany.doofplus.platform.subscriptions.interfaces.rest.transform.CreateSubscriptionCommandFromResourceAssembler;
+import com.ingescompany.doofplus.platform.subscriptions.interfaces.rest.transform.ResponseEntityFromSubscriptionCommandResultAssembler;
+import com.ingescompany.doofplus.platform.subscriptions.interfaces.rest.transform.ResponseEntityFromSubscriptionsQueryResultAssembler;
+import com.ingescompany.doofplus.platform.subscriptions.interfaces.rest.transform.SubscriptionResourceFromEntityAssembler;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
+/**
+ * Inbound service in the interface layer for subscriptions.
+ * POST operations delegate to {@link SubscriptionCommandService}; GET operations delegate to {@link SubscriptionQueryService}.
+ *
+ * @since 1.0
+ */
+@Slf4j
+@RestController
+@RequestMapping(value = "/api/v1/subscriptions", produces = APPLICATION_JSON_VALUE)
+@Tag(name = "Subscriptions", description = "Endpoints for subscriptions")
+public class SubscriptionsController {
+    private final SubscriptionCommandService subscriptionCommandService;
+    private final SubscriptionQueryService subscriptionQueryService;
+    private final MessageSource messageSource;
+
+    public SubscriptionsController(SubscriptionCommandService subscriptionCommandService,
+                                   SubscriptionQueryService subscriptionQueryService,
+                                   MessageSource messageSource) {
+        this.subscriptionCommandService = subscriptionCommandService;
+        this.subscriptionQueryService = subscriptionQueryService;
+        this.messageSource = messageSource;
+    }
+
+    /**
+     * Selects a plan for an organization (US51). The subscription starts as pending.
+     *
+     * @param resource the request payload
+     * @return the created subscription, not found when the plan does not exist, or conflict when the organization is already subscribed
+     */
+    @Operation(summary = "Create a subscription", description = "Selects a plan for an organization; the subscription starts as PENDING")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Subscription created",
+                    content = @Content(schema = @Schema(implementation = SubscriptionResource.class))),
+            @ApiResponse(responseCode = "400", description = "Bad request",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "404", description = "Plan not found",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "409", description = "Conflict - the organization already has a pending or active subscription",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping
+    public ResponseEntity<?> createSubscription(@Valid @RequestBody CreateSubscriptionResource resource) {
+        log.debug("POST /api/v1/subscriptions - organizationId={}, planId={}", resource.organizationId(), resource.planId());
+        var result = subscriptionCommandService.handle(CreateSubscriptionCommandFromResourceAssembler.toCommandFromResource(resource));
+        return ResponseEntityFromSubscriptionCommandResultAssembler.toResponseEntityFromResult(result, HttpStatus.CREATED, messageSource);
+    }
+
+    /**
+     * Activates a pending subscription once the payment is authorized (US52).
+     *
+     * @param id Subscription ID
+     * @return the active subscription, not found, or conflict when it is not pending
+     */
+    @Operation(summary = "Activate a subscription", description = "Activates a PENDING subscription once the payment is authorized")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Subscription activated",
+                    content = @Content(schema = @Schema(implementation = SubscriptionResource.class))),
+            @ApiResponse(responseCode = "404", description = "Subscription not found",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "409", description = "Conflict - the subscription is not pending",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("{id}/activation")
+    public ResponseEntity<?> activateSubscription(@PathVariable Long id) {
+        log.debug("POST /api/v1/subscriptions/{}/activation", id);
+        var result = subscriptionCommandService.handle(new ActivateSubscriptionCommand(id));
+        return ResponseEntityFromSubscriptionCommandResultAssembler.toResponseEntityFromResult(result, HttpStatus.OK, messageSource);
+    }
+
+    /**
+     * Cancels an active subscription (US53).
+     *
+     * @param id Subscription ID
+     * @return the cancelled subscription, not found, or conflict when it is not active
+     */
+    @Operation(summary = "Cancel a subscription", description = "Cancels an ACTIVE subscription; the access stays until the end of the paid period")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Subscription cancelled",
+                    content = @Content(schema = @Schema(implementation = SubscriptionResource.class))),
+            @ApiResponse(responseCode = "404", description = "Subscription not found",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "409", description = "Conflict - the subscription is not active",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("{id}/cancellation")
+    public ResponseEntity<?> cancelSubscription(@PathVariable Long id) {
+        log.debug("POST /api/v1/subscriptions/{}/cancellation", id);
+        var result = subscriptionCommandService.handle(new CancelSubscriptionCommand(id));
+        return ResponseEntityFromSubscriptionCommandResultAssembler.toResponseEntityFromResult(result, HttpStatus.OK, messageSource);
+    }
+
+    /**
+     * Gets a subscription by ID.
+     *
+     * @param id Subscription ID
+     * @return the subscription resource if found or not found otherwise
+     */
+    @Operation(summary = "Get a subscription by ID", description = "Gets a subscription by the provided ID")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Subscription found",
+                    content = @Content(schema = @Schema(implementation = SubscriptionResource.class))),
+            @ApiResponse(responseCode = "404", description = "Subscription not found",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping("{id}")
+    public ResponseEntity<?> getSubscriptionById(@PathVariable Long id) {
+        log.debug("GET /api/v1/subscriptions/{}", id);
+        var subscription = subscriptionQueryService.handle(new GetSubscriptionByIdQuery(id));
+        if (subscription.isEmpty()) {
+            return ResponseEntityFromSubscriptionsQueryResultAssembler.notFound(messageSource, "subscription.error.notFoundById", id);
+        }
+        return ResponseEntityFromSubscriptionsQueryResultAssembler.ok(subscription.get(), SubscriptionResourceFromEntityAssembler::toResourceFromEntity);
+    }
+
+    /**
+     * Gets the subscriptions of an organization.
+     *
+     * @param organizationId Organization ID
+     * @return list of subscription resources
+     */
+    @Operation(summary = "Get subscriptions by organization", description = "Gets the subscriptions of the provided organization")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Subscriptions found",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubscriptionResource.class)))),
+            @ApiResponse(responseCode = "400", description = "Bad request",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping
+    public ResponseEntity<?> getSubscriptionsByOrganizationId(
+            @Parameter(name = "organizationId", description = "Organization ID", required = true)
+            @RequestParam Long organizationId) {
+        log.debug("GET /api/v1/subscriptions?organizationId={}", organizationId);
+        if (organizationId <= 0) {
+            return ResponseEntityFromSubscriptionsQueryResultAssembler.badRequest(messageSource, "subscription.error.organizationId.invalid");
+        }
+        var subscriptions = subscriptionQueryService.handle(
+                new GetAllSubscriptionsByOrganizationIdQuery(new OrganizationId(organizationId)));
+        return ResponseEntityFromSubscriptionsQueryResultAssembler.okList(subscriptions, SubscriptionResourceFromEntityAssembler::toResourceFromEntity);
+    }
+}
