@@ -2,6 +2,11 @@ package com.ingescompany.doofplus.platform.monitoring.domain.model.valueobjects;
 
 import java.util.regex.Pattern;
 
+/**
+ * Value object representing a device ID.
+ *
+ * @param value the device ID value
+ */
 public record DeviceId(String value) {
     private static final int MAX_LENGTH = 128;
     private static final Pattern ALLOWED_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]+$");

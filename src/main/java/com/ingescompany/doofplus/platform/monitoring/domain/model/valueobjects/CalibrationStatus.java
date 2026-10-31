@@ -1,5 +1,10 @@
 package com.ingescompany.doofplus.platform.monitoring.domain.model.valueobjects;
 
+/**
+ * Value object representing the calibration status of a sensor.
+ *
+ * @param value the calibration status value
+ */
 public enum CalibrationStatus {
     FIT("fit"),
     DUE("due"),

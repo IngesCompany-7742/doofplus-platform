@@ -2,6 +2,11 @@ package com.ingescompany.doofplus.platform.monitoring.domain.model.valueobjects;
 
 import java.util.regex.Pattern;
 
+/**
+ * Value object representing an equipment code.
+ *
+ * @param value the equipment code value
+ */
 public record EquipmentCode(String value) {
     private static final int MAX_LENGTH = 64;
     private static final Pattern ALLOWED_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]+$");
